@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, './yolov5')
 
-from yolov5.utils.downloads import attempt_download
+from yolov5.utils.google_utils import attempt_download
 from yolov5.models.experimental import attempt_load
 from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import check_img_size, non_max_suppression, scale_coords, check_imshow, xyxy2xywh
@@ -14,11 +14,12 @@ import os
 import platform
 import shutil
 import time
+import datetime
 from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-
+from PIL import Image
 
 def compute_color_for_id(label):
     """
@@ -29,13 +30,22 @@ def compute_color_for_id(label):
     color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
     return tuple(color)
 
-
 def detect(opt):
     out, source, yolo_weights, deep_sort_weights, show_vid, save_vid, save_txt, imgsz, evaluate = \
         opt.output, opt.source, opt.yolo_weights, opt.deep_sort_weights, opt.show_vid, opt.save_vid, \
             opt.save_txt, opt.img_size, opt.evaluate
     webcam = source == '0' or source.startswith(
         'rtsp') or source.startswith('http') or source.endswith('.txt')
+
+    print('out :',out)
+    print('source: ',source)
+    print('yolo_weights: ',yolo_weights)
+    print('deep_sort_weights: ',deep_sort_weights)
+    print('show_vid: ',show_vid)
+    print('save_vid: ',save_vid)
+    print('save_txt: ',save_txt)
+    print('imgsz: ',imgsz)
+    print('evaluate: ',evaluate)
 
     # initialize deepsort
     cfg = get_config()
@@ -49,21 +59,23 @@ def detect(opt):
 
     # Initialize
     device = select_device(opt.device)
+    # print('device: ',device)
 
-    # The MOT16 evaluation runs multiple inference streams in parallel, each one writing to
-    # its own .txt file. Hence, in that case, the output folder is not restored
     if not evaluate:
         if os.path.exists(out):
             pass
             shutil.rmtree(out)  # delete output folder
         os.makedirs(out)  # make new output folder
     half = device.type != 'cpu'  # half precision only supported on CUDA
+    # print('half: ',half)
+    # print('device.type: ', device.type)
 
     # Load model
     model = attempt_load(yolo_weights, map_location=device)  # load FP32 model
     stride = int(model.stride.max())  # model stride
     imgsz = check_img_size(imgsz, s=stride)  # check img_size
     names = model.module.names if hasattr(model, 'module') else model.names  # get class names
+    # print('names: ', names)
     if half:
         model.half()  # to FP16
 
@@ -90,9 +102,27 @@ def detect(opt):
     save_path = str(Path(out))
     # extract what is in between the last '/' and last '.'
     txt_file_name = source.split('/')[-1].split('.')[0]
+    # print('txt_file_name: ',txt_file_name)
     txt_path = str(Path(out)) + '/' + txt_file_name + '.txt'
-
+    # print('txt_path: ',txt_path)
+    i = 0
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
+        print('-------------------')
+        cv2.imwrite('im0s.jpg', im0s)
+        # i = i + 1
+        # print('frame_idx: ',frame_idx)
+        # print('path: ',path) 
+        # print('img.shape: ',img.shape)
+        # print('im0s.shape: ',im0s.shape)
+        # print('vid_cap: ',vid_cap)
+        # im = Image.fromarray(im0s)
+        # im.save("im0s.jpeg")
+        # im2 = Image.fromarray(img)
+        # im2.save("img.jpeg")
+        # print(type(im0s))
+        # print(type(img))
+        # cv2.imwrite('img', img)
+
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -107,16 +137,34 @@ def detect(opt):
         pred = non_max_suppression(
             pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+        # print(pred)
+
+        k = 0
+        for i in pred[0]:
+            if int(i[5]) != 5:
+                pred[0] = torch.cat([pred[0][0:k], pred[0][k+1:]])
+                continue
+            k = k + 1
+
+        # print(pred)
+
+
+
+        # print('pred: ',pred)
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
+            # print('i=',i)
+            # print('det = ',det)
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
             else:
                 p, s, im0 = path, '', im0s
 
-            s += '%gx%g ' % img.shape[2:]  # print string
-            save_path = str(Path(out) / Path(p).name)
+            s += '%gx%g ' % img.shape[2:]  # print string 384x640 
+            # print(s)
+            save_path = str(Path(out) / Path(p).name) #inference/output/sample_2s.mp4
+            # print(save_path)
 
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
@@ -128,14 +176,17 @@ def detect(opt):
                     n = (det[:, -1] == c).sum()  # detections per class
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
+                print(s)
+
                 xywhs = xyxy2xywh(det[:, 0:4])
+                # print('xywhs = ',xywhs)
                 confs = det[:, 4]
+                # print('confs = ',confs)
                 clss = det[:, 5]
+                # print('clss = ',clss)
 
                 # pass detections to deepsort
                 outputs = deepsort.update(xywhs.cpu(), confs.cpu(), clss, im0)
-                
-                # draw boxes for visualization
                 if len(outputs) > 0:
                     for j, (output, conf) in enumerate(zip(outputs, confs)): 
                         
@@ -145,10 +196,20 @@ def detect(opt):
 
                         c = int(cls)  # integer class
                         label = f'{id} {names[c]} {conf:.2f}'
+                        #TODO: Minh
+                        directory = str(id)
+                        path_dir = "/home/minh/Documents/minh/mqsolutions/object_tracking_yolov5/Yolov5_DeepSort_Pytorch/Yolov5_DeepSort_Pytorch/image_xe_khach_youtube/video2/"
+                        if not os.path.exists(path_dir+directory):
+	                        os.mkdir(os.path.join(path_dir, directory))
 
 
-
-
+                        time_name = time.time()
+                        name = path_dir+str(id)+'/'+str(id)+'_'+names[c]+'_'+str(round(time_name)*10)+'_'+str(datetime.datetime.now().timestamp()).split('.')[1]+'.jpg'
+                        
+                        x1, y1, x2, y2 = int(output[0]), int(output[1]), int(output[2]), int(output[3])
+                        img_crop = im0[y1:y2, x1:x2]
+                        cv2.imwrite(name, img_crop)
+                        #------------------------
                         color = compute_color_for_id(id)
                         plot_one_box(bboxes, im0, label=label, color=color, line_thickness=2)
 
@@ -201,14 +262,16 @@ def detect(opt):
 
     print('Done. (%.3fs)' % (time.time() - t0))
 
+        # break
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--yolo_weights', type=str, default='yolov5/weights/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--yolo_weights', type=str, default='yolov5/weights/yolov5m.pt', help='model.pt path')
     parser.add_argument('--deep_sort_weights', type=str, default='deep_sort_pytorch/deep_sort/deep/checkpoint/ckpt.t7', help='ckpt.t7 path')
     # file/folder, 0 for webcam
-    parser.add_argument('--source', type=str, default='test.avi', help='source')
-    parser.add_argument('--output', type=str, default='inference', help='output folder')  # output folder
+    parser.add_argument('--source', type=str, default='0', help='source')
+    parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.4, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
@@ -228,3 +291,8 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         detect(args)
+
+
+#!python demo_track.py --yolo_weights /home/minh/Documents/minh/mqsolutions/object_tracking_yolov5/Yolov5_DeepSort_Pytorch/Yolov5_DeepSort_Pytorch/yolov5/weights/yolov5m.pt --source data/xe_khach/1.mp4 --save-vid
+
+

@@ -42,9 +42,11 @@ class Extractor(object):
     def __call__(self, im_crops):
         im_batch = self._preprocess(im_crops)
         with torch.no_grad():
-            im_batch = im_batch.to(self.device)
+            im_batch = im_batch.to(self.device) 
+            print('im_batch.shape :', im_batch.shape) #im_batch.shape : torch.Size([1, 3, 128, 64])
             features = self.net(im_batch)
-        return features.cpu().numpy()
+            print('============================features = self.net(im_batch) : ', features.shape)
+        return features.cpu().numpy() #feature.shape :  (1, 512)
 
 
 if __name__ == '__main__':

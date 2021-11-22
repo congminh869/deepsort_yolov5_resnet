@@ -1,7 +1,10 @@
 import numpy as np
 import torch
+import cv2
+import time
 
-from .deep.feature_extractor import Extractor
+from .deep.feature_extractor_resnet50 import Extractor
+# from .deep.feature_extractor import Extractor
 from .sort.nn_matching import NearestNeighborDistanceMetric
 from .sort.detection import Detection
 from .sort.tracker import Tracker
@@ -15,8 +18,7 @@ class DeepSort(object):
         self.min_confidence = min_confidence
         self.nms_max_overlap = nms_max_overlap
 
-        self.extractor = Extractor(model_path, use_cuda=use_cuda)
-
+        self.extractor = Extractor(model_path)#, use_cuda=use_cuda)
         max_cosine_distance = max_dist
         metric = NearestNeighborDistanceMetric(
             "cosine", max_cosine_distance, nn_budget)
@@ -27,9 +29,9 @@ class DeepSort(object):
         self.height, self.width = ori_img.shape[:2]
         # generate detections
         features = self._get_features(bbox_xywh, ori_img)
+        # print('features-update : ',features.shape)
         bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
-        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i, conf in enumerate(
-            confidences) if conf > self.min_confidence]
+        detections = [Detection(bbox_tlwh[i], conf, features[i]) for i, conf in enumerate(confidences) if conf > self.min_confidence]
 
         # run on non-maximum supression
         boxes = np.array([d.tlwh for d in detections])
@@ -99,16 +101,27 @@ class DeepSort(object):
         l = y1
         w = int(x2 - x1)
         h = int(y2 - y1)
-        return t, l, w, h
+        return t, l, w, int(h/2)
 
     def _get_features(self, bbox_xywh, ori_img):
         im_crops = []
         for box in bbox_xywh:
+            b = ori_img
             x1, y1, x2, y2 = self._xywh_to_xyxy(box)
+            # im = ori_img[y1:(y1 + int((y2-y1)/2)), x1:x2] #image[x:w, y:h]
             im = ori_img[y1:y2, x1:x2]
+            
             im_crops.append(im)
+            filename = '/home/minh/Documents/minh/work/object_tracking_yolov5/Yolov5_DeepSort_Pytorch/Yolov5_DeepSort_Pytorch/detect_sort/demo'+time.strftime("%Y%m%d-%H%M%S")
+            # cv2.imwrite(filename + '_full.jpg', im)
+            cv2.imwrite(filename + '_half.jpg', im)
         if im_crops:
             features = self.extractor(im_crops)
+            print('feature.shape -----------------------------------: ', features.shape)
+            # print('feature :', features)
         else:
             features = np.array([])
         return features
+
+    def _get_features_resnet50(self, bbox_xywh, ori_img):
+        pass
